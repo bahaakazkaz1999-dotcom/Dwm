@@ -1,0 +1,105 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Collection: Users ---
+    match /users/{userId} {
+      allow get: if isSignedIn();
+      allow list: if isAdmin();
+      allow create: if isSignedIn() && isOwner(userId) && 
+                      incoming().role == 'user'; // Users can't make themselves admin
+      allow update: if isOwner(userId) && 
+                      incoming().role == existing().role; // Role is immutable by user
+      allow update, delete: if isAdmin();
+    }
+
+    // --- Collection: Cases ---
+    function isValidCase(data) {
+      return data.title is string && data.title.size() <= 200 &&
+             data.description is string && data.description.size() <= 2000 &&
+             data.targetAmount is number && data.targetAmount > 0 &&
+             data.collectedAmount is number && data.collectedAmount >= 0 &&
+             data.currency in ['SYP', 'USD'] &&
+             data.status in ['pending', 'approved', 'rejected', 'completed'] &&
+             data.beneficiaryId is string && data.beneficiaryId == request.auth.uid;
+    }
+
+    match /cases/{caseId} {
+      allow read: if true; // Public can see cases
+      allow create: if isEmailVerified() && isValidCase(incoming()) && 
+                      incoming().status == 'pending' &&
+                      incoming().collectedAmount == 0;
+      
+      allow update: if (
+        (isOwner(existing().beneficiaryId) && isValidCase(incoming()) && 
+         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description'])) ||
+        isAdmin()
+      );
+      
+      allow delete: if isAdmin();
+    }
+
+    // --- Collection: Donations ---
+    function isValidDonation(data) {
+      return data.caseId is string && 
+             data.donorId is string && data.donorId == request.auth.uid &&
+             data.amount is number && data.amount > 0 &&
+             data.currency in ['SYP', 'USD'] &&
+             data.status in ['pending', 'confirmed', 'rejected'];
+    }
+
+    match /donations/{donationId} {
+      allow get: if isSignedIn() && (isOwner(existing().donorId) || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && resource.data.donorId == request.auth.uid);
+      
+      allow create: if isEmailVerified() && isValidDonation(incoming()) &&
+                      incoming().status == 'pending' &&
+                      // Verify case exists and same currency
+                      get(/databases/$(database)/documents/cases/$(incoming().caseId)).data.currency == incoming().currency &&
+                      // Verify case is approved
+                      get(/databases/$(database)/documents/cases/$(incoming().caseId)).data.status == 'approved' &&
+                      // amount check against remaining is handled by UI, but rules could check too
+                      incoming().amount <= (get(/databases/$(database)/documents/cases/$(incoming().caseId)).data.targetAmount - 
+                                          get(/databases/$(database)/documents/cases/$(incoming().caseId)).data.collectedAmount);
+
+      allow update: if isAdmin() && 
+                      incoming().diff(existing()).affectedKeys().hasOnly(['status']);
+      
+      allow delete: if isAdmin();
+    }
+  }
+}

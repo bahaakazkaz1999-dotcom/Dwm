@@ -1,0 +1,81 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "totalDonations": {
+          "type": "object",
+          "properties": {
+            "SYP": { "type": "number" },
+            "USD": { "type": "number" }
+          }
+        }
+      },
+      "required": ["uid", "name", "email", "role"]
+    },
+    "Case": {
+      "title": "Case",
+      "description": "A support case requested by a beneficiary",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "targetAmount": { "type": "number" },
+        "collectedAmount": { "type": "number" },
+        "currency": { "type": "string", "enum": ["SYP", "USD"] },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected", "completed"] },
+        "beneficiaryId": { "type": "string" },
+        "beneficiaryName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["image", "video"] },
+              "url": { "type": "string" },
+              "caption": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": ["title", "description", "targetAmount", "collectedAmount", "currency", "status", "beneficiaryId"]
+    },
+    "Donation": {
+      "title": "Donation",
+      "description": "A donation made by a donor to a case",
+      "type": "object",
+      "properties": {
+        "caseId": { "type": "string" },
+        "donorId": { "type": "string" },
+        "donorName": { "type": "string" },
+        "amount": { "type": "number" },
+        "currency": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "rejected"] },
+        "paymentProof": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["caseId", "donorId", "amount", "currency", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Stores user profiles and roles"
+    },
+    "/cases/{caseId}": {
+      "schema": "Case",
+      "description": "Stores support cases"
+    },
+    "/donations/{donationId}": {
+      "schema": "Donation",
+      "description": "Stores donation records"
+    }
+  }
+}
