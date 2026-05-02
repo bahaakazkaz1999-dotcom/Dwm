@@ -2,8 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
-import sqlite3 from "sqlite3";
-import { open } from "sqlite";
+import Database from "better-sqlite3";
 import cors from "cors";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -11,19 +10,16 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000;
 
   app.use(express.json());
   app.use(cors());
 
-  // Initialize Database
-  const db = await open({
-    filename: "./database.sqlite",
-    driver: sqlite3.Database,
-  });
+  // Initialize Database (better-sqlite3)
+  const db = new Database("./database.sqlite");
 
   // Create tables
-  await db.exec(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       uid TEXT PRIMARY KEY,
       name TEXT,
@@ -68,94 +64,109 @@ async function startServer() {
 
   // --- API Routes ---
 
-  // Auth (Simplified for demo - in production use real OAuth/JWT)
-  app.post("/api/auth/profile", async (req, res) => {
+  // Auth
+  app.post("/api/auth/profile", (req, res) => {
     const { uid, name, email } = req.body;
-    let user = await db.get("SELECT * FROM users WHERE uid = ?", [uid]);
-    
+    let user = db.prepare("SELECT * FROM users WHERE uid = ?").get(uid);
+
     if (!user) {
-      const role = email === 'bahaakazkaz1999@gmail.com' ? 'admin' : 'user';
-      await db.run(
-        "INSERT INTO users (uid, name, email, role) VALUES (?, ?, ?, ?)",
-        [uid, name, email, role]
-      );
+      const role = email === "bahaakazkaz1999@gmail.com" ? "admin" : "user";
+      db.prepare(
+        "INSERT INTO users (uid, name, email, role) VALUES (?, ?, ?, ?)"
+      ).run(uid, name, email, role);
       user = { uid, name, email, role };
     }
+
     res.json(user);
   });
 
   // Cases
-  app.get("/api/cases", async (req, res) => {
-    const cases = await db.all("SELECT * FROM cases ORDER BY createdAt DESC");
+  app.get("/api/cases", (req, res) => {
+    const cases = db.prepare("SELECT * FROM cases ORDER BY createdAt DESC").all();
     for (const c of cases) {
-      c.evidence = await db.all("SELECT url, type FROM case_evidence WHERE caseId = ?", [c.id]);
+      c.evidence = db
+        .prepare("SELECT url, type FROM case_evidence WHERE caseId = ?")
+        .all(c.id);
     }
     res.json(cases);
   });
 
-  app.post("/api/cases", async (req, res) => {
-    const { id, title, description, beneficiaryName, targetAmount, currency, authorId } = req.body;
-    await db.run(
-      "INSERT INTO cases (id, title, description, beneficiaryName, targetAmount, currency, authorId) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [id, title, description, beneficiaryName, targetAmount, currency, authorId]
-    );
-    res.json({ id, status: 'pending' });
+  app.post("/api/cases", (req, res) => {
+    const { id, title, description, beneficiaryName, targetAmount, currency, authorId } =
+      req.body;
+
+    db.prepare(
+      "INSERT INTO cases (id, title, description, beneficiaryName, targetAmount, currency, authorId) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(id, title, description, beneficiaryName, targetAmount, currency, authorId);
+
+    res.json({ id, status: "pending" });
   });
 
-  app.patch("/api/cases/:id", async (req, res) => {
+  app.patch("/api/cases/:id", (req, res) => {
     const { status, evidence } = req.body;
+
     if (status) {
-      await db.run("UPDATE cases SET status = ? WHERE id = ?", [status, req.params.id]);
+      db.prepare("UPDATE cases SET status = ? WHERE id = ?").run(status, req.params.id);
     }
+
     if (evidence && Array.isArray(evidence)) {
+      const stmt = db.prepare(
+        "INSERT INTO case_evidence (caseId, url, type) VALUES (?, ?, ?)"
+      );
       for (const ev of evidence) {
-        await db.run("INSERT INTO case_evidence (caseId, url, type) VALUES (?, ?, ?)", [req.params.id, ev.url, ev.type]);
+        stmt.run(req.params.id, ev.url, ev.type);
       }
     }
+
     res.json({ success: true });
   });
 
   // Donations
-  app.get("/api/donations", async (req, res) => {
-    const donations = await db.all("SELECT * FROM donations ORDER BY createdAt DESC");
+  app.get("/api/donations", (req, res) => {
+    const donations = db.prepare("SELECT * FROM donations ORDER BY createdAt DESC").all();
     res.json(donations);
   });
 
-  app.post("/api/donations", async (req, res) => {
+  app.post("/api/donations", (req, res) => {
     const { id, caseId, amount, currency, donorId, donorName, paymentProof } = req.body;
-    await db.run(
-      "INSERT INTO donations (id, caseId, amount, currency, donorId, donorName, paymentProof) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [id, caseId, amount, currency, donorId, donorName, paymentProof]
-    );
-    res.json({ id, status: 'pending' });
+
+    db.prepare(
+      "INSERT INTO donations (id, caseId, amount, currency, donorId, donorName, paymentProof) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(id, caseId, amount, currency, donorId, donorName, paymentProof);
+
+    res.json({ id, status: "pending" });
   });
 
-  app.post("/api/donations/:id/confirm", async (req, res) => {
-    const donation = await db.get("SELECT * FROM donations WHERE id = ?", [req.params.id]);
-    if (donation && donation.status === 'pending') {
-      await db.run("UPDATE donations SET status = 'confirmed' WHERE id = ?", [req.params.id]);
-      await db.run(
-        "UPDATE cases SET collectedAmount = collectedAmount + ? WHERE id = ?",
-        [donation.amount, donation.caseId]
-      );
-      
-      // Update case status if target reached
-      const caseData = await db.get("SELECT * FROM cases WHERE id = ?", [donation.caseId]);
+  app.post("/api/donations/:id/confirm", (req, res) => {
+    const donation = db.prepare("SELECT * FROM donations WHERE id = ?").get(req.params.id);
+
+    if (donation && donation.status === "pending") {
+      db.prepare("UPDATE donations SET status = 'confirmed' WHERE id = ?").run(req.params.id);
+
+      db.prepare(
+        "UPDATE cases SET collectedAmount = collectedAmount + ? WHERE id = ?"
+      ).run(donation.amount, donation.caseId);
+
+      const caseData = db.prepare("SELECT * FROM cases WHERE id = ?").get(donation.caseId);
+
       if (caseData.collectedAmount >= caseData.targetAmount) {
-        await db.run("UPDATE cases SET status = 'completed' WHERE id = ?", [donation.caseId]);
+        db.prepare("UPDATE cases SET status = 'completed' WHERE id = ?").run(donation.caseId);
       }
     }
+
     res.json({ success: true });
   });
 
-  app.post("/api/donations/:id/reject", async (req, res) => {
-    await db.run("UPDATE donations SET status = 'rejected' WHERE id = ?", [req.params.id]);
+  app.post("/api/donations/:id/reject", (req, res) => {
+    db.prepare("UPDATE donations SET status = 'rejected' WHERE id = ?").run(req.params.id);
     res.json({ success: true });
   });
 
   // Leaderboard
-  app.get("/api/leaderboard", async (req, res) => {
-    const leaderboard = await db.all(`
+  app.get("/api/leaderboard", (req, res) => {
+    const leaderboard = db
+      .prepare(
+        `
       SELECT 
         u.uid, u.name, 
         SUM(CASE WHEN d.currency = 'SYP' THEN d.amount ELSE 0 END) as sypTotal,
@@ -166,12 +177,14 @@ async function startServer() {
       WHERE d.status = 'confirmed'
       GROUP BY u.uid
       ORDER BY usdTotal DESC, sypTotal DESC
-    `);
+    `
+      )
+      .all();
+
     res.json(leaderboard);
   });
 
-  // --- Vite / Frontend Serving ---
-
+  // Frontend
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -187,7 +200,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on port ${PORT}`);
   });
 }
 
