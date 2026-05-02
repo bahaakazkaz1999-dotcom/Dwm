@@ -9,12 +9,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Serve frontend build
+// Path to dist folder
 const __dirname = process.cwd();
-app.use(express.static(path.join(__dirname, "dist")));
+const distPath = path.join(__dirname, "dist");
 
+// Serve static files
+app.use(express.static(distPath));
+
+// Catch-all route for React
 app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "dist", "index.html"));
+  res.sendFile(path.join(distPath, "index.html"));
 });
 
 // Start server
