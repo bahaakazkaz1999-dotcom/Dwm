@@ -9,20 +9,19 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Path to dist folder
-const __dirname = process.cwd();
-const distPath = path.join(__dirname, "dist");
+const PORT = Number(process.env.PORT) || 3000;
 
-// Serve static files
+// المسار الصحيح داخل Railway
+const distPath = path.join(process.cwd(), "dist");
+
+// تأكد إنو dist موجود
 app.use(express.static(distPath));
 
-// Catch-all route for React
+// fallback لكل المسارات
 app.get("*", (req, res) => {
   res.sendFile(path.join(distPath, "index.html"));
 });
 
-// Start server
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("Server running on port", PORT);
 });
