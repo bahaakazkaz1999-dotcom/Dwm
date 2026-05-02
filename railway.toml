@@ -1,8 +1,5 @@
 [build]
-builder = "NIXPACKS"
-
-[build.env]
-NODE_VERSION = "22"
+# IMPORTANT: remove builder = "NIXPACKS"
 
 [deploy]
 start = "npm start"
