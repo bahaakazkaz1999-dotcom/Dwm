@@ -5,7 +5,7 @@
   "type": "module",
 
   "engines": {
-    "npm": "10.x"
+    "node": "22.x"
   },
 
   "scripts": {
